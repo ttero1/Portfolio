@@ -12,6 +12,7 @@ type Project = {
 const TECH = [
   "C++",
   "TypeScript",
+  "JavaScript",
   "React",
   "Node.js",
   "Docker",
@@ -38,6 +39,14 @@ const PROJECTS: Project[] = [
   tags: ["TypeScript", "Three.js", "WebGL", "Shaders"],
   href: "/cube", 
   status: "Featured",
+  },
+  {
+  title: "Clipboard OCR Extension",
+  description:
+    "Interactive Three.js scene with orbit controls, animated gradient shader background, bloom + outline post-processing, and rotation toggle.",
+  tags: ["JavaScript"],
+  external: "https://github.com/ttero1/OCR-extension", 
+  status: "In Progress",
   },
   {
     title: "Portfolio (This Site)",
