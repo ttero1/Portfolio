@@ -1,0 +1,7 @@
+{
+"name": "irc-ws-proxy",
+"type": "module",
+"dependencies": {
+"ws": "^8.17.0"
+}
+}

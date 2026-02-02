@@ -1,0 +1,30 @@
+
+services:
+  irc:
+    build: ./irc
+    container_name: irc_server
+    ports:
+    - "6667:6667"
+
+
+  proxy:
+    build: ./proxy
+    container_name: irc_proxy
+    depends_on:
+    - irc
+    environment:
+    - IRC_HOST=irc
+    - IRC_PORT=6667
+    ports:
+    - "3001:3001"
+
+
+  frontend:
+    build: ./frontend
+    container_name: irc_frontend
+    depends_on:
+    - proxy
+    ports:
+    - "5173:4173"
+
+    

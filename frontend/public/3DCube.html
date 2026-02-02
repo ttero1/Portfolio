@@ -1,0 +1,289 @@
+<!-- 3DCube.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>3D Cube with Animated Gradient</title>
+
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+  }
+  canvas { display: block; }
+
+  #info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-family: Arial, sans-serif;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+    border-radius: 6px;
+    z-index: 10;
+  }
+
+  /* Pause button */
+  #toggleRotation {
+    position: absolute;
+    top: 50px;
+    left: 10px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    transition: 0.2s;
+    z-index: 10;
+  }
+
+  #toggleRotation:hover {
+    background: rgba(0,0,0,0.65);
+  }
+
+  /* Project link card */
+  #projectLink {
+    position: absolute;
+    top: 110px;
+    left: 10px;
+    width: 280px;
+    padding: 12px;
+    color: white;
+    text-decoration: none;
+    font-family: Arial, sans-serif;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px;
+    z-index: 10;
+    backdrop-filter: blur(6px);
+    transition:
+      transform 0.15s ease,
+      background 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  #projectLink:hover {
+    transform: translateY(-1px);
+    background: rgba(0,0,0,0.65);
+    border-color: rgba(255,255,255,0.28);
+  }
+
+  #projectLink:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(168,85,247,0.55);
+  }
+
+  .pl-title {
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.2px;
+  }
+
+  .pl-desc {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(255,255,255,0.75);
+  }
+
+  .pl-cta {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(209,213,219,0.95);
+  }
+</style>
+</head>
+
+<body>
+
+<button id="toggleRotation">⏸ Pause Rotation</button>
+
+<div id="info">✨ 3D Cube • Drag to orbit • Scroll to zoom</div>
+
+<a id="projectLink" href="/">
+  <div class="pl-title">🧊 3D Cube</div>
+  <div class="pl-desc">
+    Three.js demo with animated shader background, orbit controls,
+    bloom + outline post-processing, and rotation toggle.
+  </div>
+  <div class="pl-cta">Open →</div>
+</a>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutlinePass } from "three/examples/jsm/postprocessing/OutlinePass.js";
+
+// Scene
+const scene = new THREE.Scene();
+
+// Camera
+const camera = new THREE.PerspectiveCamera(
+  75,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  200
+);
+camera.position.set(4, 3, 6);
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.shadowMap.enabled = true;
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.minDistance = 3;
+controls.maxDistance = 15;
+controls.minPolarAngle = 0;
+controls.maxPolarAngle = Math.PI / 2.1;
+controls.dampingFactor = 0.08;
+controls.zoomSpeed = 0.6;
+
+// Background sphere (shader)
+const bgGeometry = new THREE.SphereGeometry(80, 64, 64);
+const bgMaterial = new THREE.ShaderMaterial({
+  uniforms: { time: { value: 0 } },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float time;
+    varying vec2 vUv;
+    void main() {
+      vec3 color = vec3(
+        0.5 + 0.5*sin(time + vUv.x*3.0),
+        0.3 + 0.3*cos(time + vUv.y*5.0),
+        0.6 + 0.4*sin(time + vUv.x + vUv.y)
+      );
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+  side: THREE.BackSide,
+  depthWrite: false
+});
+
+const bgSphere = new THREE.Mesh(bgGeometry, bgMaterial);
+camera.add(bgSphere);
+scene.add(camera);
+
+// Lighting
+const pointLight = new THREE.PointLight(0xffffff, 2);
+pointLight.position.set(5, 5, 5);
+pointLight.castShadow = true;
+scene.add(pointLight);
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+// Floor
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(30, 30),
+  new THREE.MeshStandardMaterial({ color: 0x111111 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// Cube
+const geometry = new THREE.BoxGeometry(2, 2, 2);
+const materials = [
+  new THREE.MeshStandardMaterial({ color: 0xff3333, emissive: 0xaa0000, metalness: 1.0, roughness: 0.1 }),
+  new THREE.MeshStandardMaterial({ color: 0x33ff33, emissive: 0x00aa00, metalness: 1.0, roughness: 0.1 }),
+  new THREE.MeshStandardMaterial({ color: 0x3333ff, emissive: 0x0000aa, metalness: 1.0, roughness: 0.1 }),
+  new THREE.MeshStandardMaterial({ color: 0xffff33, emissive: 0xaaaa00, metalness: 1.0, roughness: 0.1 }),
+  new THREE.MeshStandardMaterial({ color: 0xff33ff, emissive: 0xaa00aa, metalness: 1.0, roughness: 0.1 }),
+  new THREE.MeshStandardMaterial({ color: 0x33ffff, emissive: 0x00aaaa, metalness: 1.0, roughness: 0.1 })
+];
+
+const cube = new THREE.Mesh(geometry, materials);
+cube.castShadow = true;
+scene.add(cube);
+
+// Post-processing
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  1.0,
+  0.4,
+  0.8
+);
+composer.addPass(bloom);
+
+const outlinePass = new OutlinePass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  scene,
+  camera
+);
+outlinePass.edgeStrength = 4.0;
+outlinePass.edgeThickness = 1.5;
+outlinePass.visibleEdgeColor.set("#ffffff");
+outlinePass.hiddenEdgeColor.set("#000000");
+outlinePass.selectedObjects = [cube];
+composer.addPass(outlinePass);
+
+// Animation
+let isRotating = true;
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const elapsed = clock.getElapsedTime();
+  bgMaterial.uniforms.time.value = elapsed;
+
+  if (isRotating) {
+    cube.rotation.x += 0.003;
+    cube.rotation.y += 0.006;
+  }
+
+  controls.update();
+  composer.render();
+}
+animate();
+
+// Toggle rotation
+document.getElementById("toggleRotation").addEventListener("click", () => {
+  isRotating = !isRotating;
+  document.getElementById("toggleRotation").textContent =
+    isRotating ? "⏸ Pause Rotation" : "▶ Resume Rotation";
+});
+
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  outlinePass.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+
+</body>
+</html>
