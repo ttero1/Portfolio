@@ -43,7 +43,7 @@ const PROJECTS: Project[] = [
   {
   title: "Clipboard OCR Extension",
   description:
-    "Interactive Three.js scene with orbit controls, animated gradient shader background, bloom + outline post-processing, and rotation toggle.",
+    "A lightweight browser extension that turns clipboard images into text using Tesseract.js.",
   tags: ["JavaScript"],
   external: "https://github.com/ttero1/OCR-extension", 
   status: "In Progress",
