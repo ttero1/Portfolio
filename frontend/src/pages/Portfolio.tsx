@@ -44,7 +44,7 @@ const PROJECTS: Project[] = [
     description:
       "Personal portfolio built with React + TypeScript + Tailwind. Clean UI, project cards, and internal demos.",
     tags: ["React", "TypeScript", "Tailwind", "Vite"],
-    external: "https://github.com/ttero1/portfolio", 
+    external: "https://github.com/ttero1/Portfolio", 
     status: "Shipped",
   },
 ];
