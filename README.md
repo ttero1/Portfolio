@@ -89,6 +89,5 @@ Then open `http://localhost:5173` and ensure the WebSocket URL points at `ws://l
 ## Notes
 
 - The IRC server enforces simple password rules (alphanumeric, 3–20 chars) and only accepts port `6660–6669` or `6697`.
-- TLS is not implemented; use plaintext connections.
 
 See `irc/README.md` for detailed IRC server usage and supported commands.
