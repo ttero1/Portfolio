@@ -7,7 +7,6 @@ A small portfolio project that showcases a full IRC stack:
 - **React frontend (Vite + Tailwind)** — a web IRC client UI.
 
 The stack is orchestrated with Docker Compose for a one-command demo.
-The portfolio is running on Azure Container Apps at https://www.teemutero.com/
 
 ## Architecture
 
