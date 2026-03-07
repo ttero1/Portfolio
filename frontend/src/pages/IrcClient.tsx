@@ -367,21 +367,20 @@ export default function IrcClient() {
         />
       </div>
       <button
-          onClick={() => navigate("/")}
-            style={{
-            alignSelf: "flex-start",
-            marginBottom: 10,
-            padding: "6px 10px",
-            background: "#111",
-            color: "#0f0",
-            border: "1px solid #333",
-            cursor: "pointer",
-            fontFamily: "monospace",
-          }}
-          >
-          ← Return to frontpage
-        </button>
+        onClick={() => navigate("/")}
+        style={{
+          alignSelf: "flex-start",
+          marginTop: "auto",   
+          padding: "6px 10px",
+          background: "#111",
+          color: "#0f0",
+          border: "1px solid #333",
+          cursor: "pointer",
+          fontFamily: "monospace",
+        }}
+      >
+        ← Return to frontpage
+      </button>
     </div>
   );
 }
-
