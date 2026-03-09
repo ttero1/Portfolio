@@ -33,7 +33,7 @@ const PROJECTS: Project[] = [
       "Non-blocking IRC server written in C++ using poll() to manage multiple clients, authentication, channels, private messaging, and operator commands. A React + TypeScript web client visualizes live protocol behavior and server state.",
     tags: ["C++", "Sockets", "poll()", "Networking", "React", "TypeScript"],
     href: "/irc",
-    github: "https://github.com/ttero1",
+    github: "https://github.com/ttero1/IRC-Web-Client",
     status: "Featured",
     featured: true,
   },
