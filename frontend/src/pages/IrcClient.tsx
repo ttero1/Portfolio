@@ -84,197 +84,281 @@ export default function IrcClient() {
   };
 
   useEffect(() => {
-  let ws: WebSocket | null = null;
-  let cancelled = false;
+    let ws: WebSocket | null = null;
+    let cancelled = false;
 
-  async function start() {
-    // Fetch runtime config served by the frontend container
-    let cfg: any = {};
-    try {
-      const res = await fetch("/config.json", { cache: "no-store" });
-      cfg = await res.json().catch(() => ({}));
-    } catch {
-      cfg = {};
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempts = 0;
+    let manuallyClosed = false;
+
+    async function sleep(ms: number) {
+      await new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    // If wsUrl is empty/missing, fall back:
-    // - localhost: ws://localhost:3001
-    // - otherwise:  ws(s)://<frontend-host>
-    const fallback =
-      window.location.hostname === "localhost"
-        ? "ws://localhost:3001"
-        : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
+    function getBackoffDelay(attempt: number) {
+      // 1s, 2s, 4s, 8s, 10s max
+      return Math.min(1000 * Math.pow(2, attempt), 10000);
+    }
 
-    const wsUrl =
-      cfg.wsUrl && String(cfg.wsUrl).trim()
-        ? String(cfg.wsUrl).trim()
-        : fallback;
+    
+    async function waitForBackendReady(httpBase: string, timeoutMs = 60000) {
+      const start = Date.now();
+      let announcedWaiting = false;
 
-    if (cancelled) return;
+      while (!cancelled && Date.now() - start < timeoutMs) {
+        try {
+          const res = await fetch(`${httpBase}/health`, {
+            cache: "no-store",
+          });
 
-    ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      // reset session state
-      setRegistered(false);
-      registeredRef.current = false;
-      postRegisterQueueRef.current = [];
-      setJoinedChannels(new Set());
-      setActiveTarget(null);
-
-      ws!.send("PASS password");
-      ws!.send(`NICK ${myNickRef.current}`);
-      ws!.send(`USER ${myNickRef.current} 0 b Web Client`);
-
-      enqueueOrSend("JOIN #general");
-    };
-
-    ws.onmessage = (e) => {
-      const raw = e.data as string;
-      const lines = raw.split("\r\n").filter(Boolean);
-
-      for (const line of lines) {
-        if (line.startsWith("PING")) {
-          ws!.send(line.replace("PING", "PONG"));
-          continue;
-        }
-
-        // 001 => registered;
-        const welcome001 = line.match(/^:[^ ]+\s+001\s+([^ ]+)\s+:/);
-        if (welcome001) {
-          const [, realNick] = welcome001;
-
-          setRegistered(true);
-          setMyNick(realNick);
-          pendingNickRef.current = null;
-
-          // flush queued commands (JOIN, etc.)
-          const q = postRegisterQueueRef.current;
-          postRegisterQueueRef.current = [];
-          for (const cmd of q) wsRef.current?.send(cmd);
-
-        }
-
-        // Server confirms nick change:
-        const nickChange = line.match(/^:([^!]+)![^\s]+ NICK :?(.+)$/);
-        if (nickChange) {
-          const [, oldNick, newNickRaw] = nickChange;
-          const newNick = newNickRaw.trim();
-
-          if (oldNick === myNickRef.current) {
-            setMyNick(newNick);
-            pendingNickRef.current = null;
-          }
-        }
-
-        // 433 => nickname in use. Try a new one 
-        const err433 = line.match(/^:[^ ]+ 433 ([^ ]+) ([^ ]+) :(.*)$/);
-        if (err433) {
-          const [, , badNick] = err433;
-
-          const suffix = Math.floor(10 + Math.random() * 90); // 2 digits
-          const newNick = `${badNick}${suffix}`;
-
-          pendingNickRef.current = newNick;
-          wsRef.current?.send(`NICK ${newNick}`);
+          if (res.ok) return true;
 
           setMessages((prev) => [
             ...prev,
-            `(!) Nick '${badNick}' is in use. Trying '${newNick}'...`,
+            `Health check failed: HTTP ${res.status}`,
           ]);
-
-          continue;
+        } catch (err) {
+          setMessages((prev) => [
+            ...prev,
+            `Health check error: ${err instanceof Error ? err.message : "unknown error"}`,
+          ]);
         }
 
-        // YOU JOINED a channel (server echo)
-        const joinMatch = line.match(/^:([^!]+)![^\s]+\s+JOIN\s+:?(#\S+)/i);
-        if (joinMatch) {
-          const [, nick, channel] = joinMatch;
-
-          if (nick === myNickRef.current) {
-            setJoinedChannels((prev) => {
-              const next = new Set(prev);
-              next.add(channel);
-              return next;
-            });
-            setActiveTarget(channel);
-          }
+        if (!announcedWaiting) {
+          announcedWaiting = true;
+          setMessages((prev) => [...prev, "Starting IRC backend..."]);
         }
 
-        // YOU PARTED a channel
-        const partMatch = line.match(/^:([^!]+)![^\s]+\s+PART\s+(#\S+)/i);
-        if (partMatch) {
-          const [, nick, channel] = partMatch;
-
-          if (nick === myNickRef.current) {
-            setJoinedChannels((prev) => {
-              const next = new Set(prev);
-              next.delete(channel);
-              setActiveTarget((current) =>
-                pickNextActive(next, current === channel ? null : current)
-              );
-              return next;
-            });
-          }
-        }
-
-        // YOU QUIT
-        const quitMatch = line.match(/^:([^!]+)![^\s]+\s+QUIT\b/i);
-        if (quitMatch) {
-          const [, nick] = quitMatch;
-
-          if (nick === myNickRef.current) {
-            setJoinedChannels(new Set());
-            setActiveTarget(null);
-            setRegistered(false);
-            registeredRef.current = false;
-            postRegisterQueueRef.current = [];
-          }
-        }
-
-        // YOU GOT KICKED
-        const kickMatch = line.match(/^:[^ ]+\s+KICK\s+(#\S+)\s+([^\s]+)/i);
-        if (kickMatch) {
-          const [, channel, nick] = kickMatch;
-
-          if (nick === myNickRef.current) {
-            setJoinedChannels((prev) => {
-              const next = new Set(prev);
-              next.delete(channel);
-              setActiveTarget((current) =>
-                pickNextActive(next, current === channel ? null : current)
-              );
-              return next;
-            });
-          }
-        }
-
-        const parsed = parseIRCMessage(line);
-        if (parsed) setMessages((prev) => [...prev, parsed]);
+        await sleep(1500);
       }
-    };
 
-    ws.onerror = (error) => console.error("WebSocket error:", error);
+      return false;
+    }
 
-    ws.onclose = () => {
+    function resetSessionState() {
       setRegistered(false);
       registeredRef.current = false;
       postRegisterQueueRef.current = [];
       setJoinedChannels(new Set());
       setActiveTarget(null);
+    }
+
+    function scheduleReconnect(wsUrl: string) {
+      if (cancelled || manuallyClosed) return;
+
+      const delay = getBackoffDelay(reconnectAttempts);
+      reconnectAttempts += 1;
+
+      setMessages((prev) => [
+        ...prev,
+        `Connection lost. Retrying in ${Math.round(delay / 1000)}s...`,
+      ]);
+
+      reconnectTimer = setTimeout(() => {
+        connect(wsUrl).catch((err) =>
+          console.error("Reconnect failed to start:", err)
+        );
+      }, delay);
+    }
+
+    async function connect(wsUrl: string) {
+      const httpBase =
+        wsUrl.startsWith("wss://")
+          ? wsUrl.replace("wss://", "https://")
+          : wsUrl.replace("ws://", "http://");
+
+      const ready = await waitForBackendReady(httpBase, 60000);
+
+      if (cancelled) return;
+
+      if (!ready) {
+        setMessages((prev) => [
+          ...prev,
+          "Backend did not become ready in time. Will retry...",
+        ]);
+        scheduleReconnect(wsUrl);
+        return;
+      }
+
+      setMessages((prev) => [...prev, "Backend ready. Connecting..."]);
+
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectAttempts = 0;
+
+        resetSessionState();
+
+        ws!.send("PASS password");
+        ws!.send(`NICK ${myNickRef.current}`);
+        ws!.send(`USER ${myNickRef.current} 0 b Web Client`);
+
+        enqueueOrSend("JOIN #general");
+      };
+
+      ws.onmessage = (e) => {
+        const raw = e.data as string;
+        const lines = raw.split("\r\n").filter(Boolean);
+
+        for (const line of lines) {
+          if (line.startsWith("PING")) {
+            ws!.send(line.replace("PING", "PONG"));
+            continue;
+          }
+
+          const welcome001 = line.match(/^:[^ ]+\s+001\s+([^ ]+)\s+:/);
+          if (welcome001) {
+            const [, realNick] = welcome001;
+
+            setRegistered(true);
+            registeredRef.current = true;
+            setMyNick(realNick);
+            pendingNickRef.current = null;
+
+            const q = postRegisterQueueRef.current;
+            postRegisterQueueRef.current = [];
+            for (const cmd of q) wsRef.current?.send(cmd);
+          }
+
+          const nickChange = line.match(/^:([^!]+)![^\s]+ NICK :?(.+)$/);
+          if (nickChange) {
+            const [, oldNick, newNickRaw] = nickChange;
+            const newNick = newNickRaw.trim();
+
+            if (oldNick === myNickRef.current) {
+              setMyNick(newNick);
+              pendingNickRef.current = null;
+            }
+          }
+
+          const err433 = line.match(/^:[^ ]+ 433 ([^ ]+) ([^ ]+) :(.*)$/);
+          if (err433) {
+            const [, , badNick] = err433;
+
+            const suffix = Math.floor(10 + Math.random() * 90);
+            const newNick = `${badNick}${suffix}`;
+
+            pendingNickRef.current = newNick;
+            wsRef.current?.send(`NICK ${newNick}`);
+
+            setMessages((prev) => [
+              ...prev,
+              `(!) Nick '${badNick}' is in use. Trying '${newNick}'...`,
+            ]);
+
+            continue;
+          }
+
+          const joinMatch = line.match(/^:([^!]+)![^\s]+\s+JOIN\s+:?(#\S+)/i);
+          if (joinMatch) {
+            const [, nick, channel] = joinMatch;
+
+            if (nick === myNickRef.current) {
+              setJoinedChannels((prev) => {
+                const next = new Set(prev);
+                next.add(channel);
+                return next;
+              });
+              setActiveTarget(channel);
+            }
+          }
+
+          const partMatch = line.match(/^:([^!]+)![^\s]+\s+PART\s+(#\S+)/i);
+          if (partMatch) {
+            const [, nick, channel] = partMatch;
+
+            if (nick === myNickRef.current) {
+              setJoinedChannels((prev) => {
+                const next = new Set(prev);
+                next.delete(channel);
+                setActiveTarget((current) =>
+                  pickNextActive(next, current === channel ? null : current)
+                );
+                return next;
+              });
+            }
+          }
+
+          const quitMatch = line.match(/^:([^!]+)![^\s]+\s+QUIT\b/i);
+          if (quitMatch) {
+            const [, nick] = quitMatch;
+
+            if (nick === myNickRef.current) {
+              resetSessionState();
+            }
+          }
+
+          const kickMatch = line.match(/^:[^ ]+\s+KICK\s+(#\S+)\s+([^\s]+)/i);
+          if (kickMatch) {
+            const [, channel, nick] = kickMatch;
+
+            if (nick === myNickRef.current) {
+              setJoinedChannels((prev) => {
+                const next = new Set(prev);
+                next.delete(channel);
+                setActiveTarget((current) =>
+                  pickNextActive(next, current === channel ? null : current)
+                );
+                return next;
+              });
+            }
+          }
+
+          const parsed = parseIRCMessage(line);
+          if (parsed) setMessages((prev) => [...prev, parsed]);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+        resetSessionState();
+
+        if (!cancelled && !manuallyClosed) {
+          scheduleReconnect(wsUrl);
+        }
+      };
+    }
+
+    async function start() {
+      let cfg: any = {};
+      try {
+        const res = await fetch("/config.json", { cache: "no-store" });
+        cfg = await res.json().catch(() => ({}));
+      } catch {
+        cfg = {};
+      }
+
+      const fallback =
+        window.location.hostname === "localhost"
+          ? "ws://localhost:3001"
+          : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
+
+      const wsUrl =
+        cfg.wsUrl && String(cfg.wsUrl).trim()
+          ? String(cfg.wsUrl).trim()
+          : fallback;
+
+      await connect(wsUrl);
+    }
+
+    start().catch((err) => console.error("Failed to start WS:", err));
+
+    return () => {
+      cancelled = true;
+      manuallyClosed = true;
+
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+
+      try {
+        ws?.close();
+      } catch {}
     };
-  }
-
-  start().catch((err) => console.error("Failed to start WS:", err));
-
-  return () => {
-    cancelled = true;
-    try {
-      ws?.close();
-    } catch {}
-  };
-}, []);
+  }, []);
 
   
 
@@ -384,3 +468,4 @@ export default function IrcClient() {
     </div>
   );
 }
+
